@@ -1,0 +1,40 @@
+spring:
+  application:
+    name: cashflow-settlement-engine
+
+  # -------------------------------------------------------------------
+  # PostgreSQL datasource -- swap credentials via env vars in production.
+  # Defaults here are for local dev only.
+  # -------------------------------------------------------------------
+  datasource:
+    url: jdbc:postgresql://${DB_HOST:localhost}:${DB_PORT:5432}/${DB_NAME:cashflow_db}
+    username: ${DB_USER:postgres}
+    password: ${DB_PASS:postgres}
+    driver-class-name: org.postgresql.Driver
+
+  jpa:
+    hibernate:
+      # 'update' is fine for dev -- auto-creates/alters tables without
+      # nuking existing data. Switch to 'validate' + Flyway before prod.
+      ddl-auto: update
+    show-sql: true
+    properties:
+      hibernate:
+        # Explicit dialect so Hibernate doesn't have to guess from JDBC URL.
+        dialect: org.hibernate.dialect.PostgreSQLDialect
+        format_sql: true
+
+  # -------------------------------------------------------------------
+  # Async task executor -- sized so the settlement thread pool never
+  # starves the main I/O pool. Core threads stay alive between jobs.
+  # -------------------------------------------------------------------
+  task:
+    execution:
+      pool:
+        core-size: 4
+        max-size: 10
+        queue-capacity: 50
+      thread-name-prefix: settlement-async-
+
+server:
+  port: 8080
