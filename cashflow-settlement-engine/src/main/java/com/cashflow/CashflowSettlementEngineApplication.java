@@ -4,9 +4,8 @@ import org.springframework.boot.SpringApplication;
 import org.springframework.boot.autoconfigure.SpringBootApplication;
 import org.springframework.scheduling.annotation.EnableAsync;
 
-// @EnableAsync activates Spring's async method execution, wiring up the
-// task executor configured in application.yml (spring.task.execution.*).
-// Without this, @Async is a no-op and settlement runs on the I/O thread.
+// @EnableAsync wires up the task executor in application.yml so that
+// @Async methods in LedgerService actually run off the I/O thread.
 @SpringBootApplication
 @EnableAsync
 public class CashflowSettlementEngineApplication {

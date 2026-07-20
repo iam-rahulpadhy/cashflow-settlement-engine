@@ -12,19 +12,12 @@ import java.util.List;
 import java.util.UUID;
 import java.util.concurrent.CompletableFuture;
 
-/**
- * REST controller exposing the cash-flow settlement engine over HTTP.
+/*
+ * REST API for the settlement engine, versioned under /api/v1/settlements.
  *
- * <p>All routes are versioned under /api/v1/settlements so future breaking
- * changes can live under /api/v2/... without disrupting existing clients.</p>
- *
- * <h2>Thread model</h2>
- * <p>Synchronous endpoints (POST /transactions, GET /optimize) hold the
- * Tomcat thread for the duration. Async endpoints (/optimize/async,
- * /optimize/group) delegate to LedgerService's @Async methods, which
- * run on the "settlement-async-" thread pool. Spring MVC unwraps the
- * returned CompletableFuture into a deferred HTTP response automatically,
- * so the I/O thread is released the moment the future is handed back.</p>
+ * Sync endpoints hold the Tomcat thread. Async endpoints return a
+ * CompletableFuture; Spring MVC unwraps it into a deferred HTTP response so
+ * the I/O thread is released as soon as the future is handed back.
  */
 @RestController
 @RequestMapping("/api/v1/settlements")
@@ -38,114 +31,49 @@ public class SettlementController {
         this.ledgerService = ledgerService;
     }
 
-    // -------------------------------------------------------------------------
-    // Transaction ingestion
-    // -------------------------------------------------------------------------
-
-    /**
-     * POST /api/v1/settlements/transactions
-     *
-     * <p>Ingests a single raw expense obligation. The record is validated
-     * (positive amount, distinct parties) and persisted. It will be included
-     * in the next optimisation pass.</p>
-     *
-     * <p>Example body:
-     * {"amount": 120.50, "description": "Dinner", "payerId": "...", "payeeId": "..."}</p>
-     *
-     * @param transaction raw expense from the JSON body
-     * @return 201 Created with the saved entity (ID and timestamps populated)
-     */
+    // POST /transactions -- ingest a single raw expense obligation
     @PostMapping("/transactions")
     public ResponseEntity<ExpenseTransaction> addTransaction(
             @RequestBody ExpenseTransaction transaction) {
 
-        log.info("POST /transactions — payerId={} payeeId={} amount={}",
+        log.info("POST /transactions payer={} payee={} amount={}",
                 transaction.getPayerId(), transaction.getPayeeId(), transaction.getAmount());
 
-        ExpenseTransaction saved = ledgerService.saveTransaction(transaction);
-        return ResponseEntity.status(HttpStatus.CREATED).body(saved);
+        return ResponseEntity.status(HttpStatus.CREATED)
+                .body(ledgerService.saveTransaction(transaction));
     }
 
-    /**
-     * POST /api/v1/settlements/transactions/batch
-     *
-     * <p>Ingests a JSON array of raw expenses in one transactional batch.
-     * Useful for bulk-importing a trip's receipts. Any single validation
-     * failure rolls back the entire batch.</p>
-     *
-     * @param transactions list of raw expenses from the JSON body
-     * @return 201 Created with the list of saved entities
-     */
+    // POST /transactions/batch -- bulk ingest; one validation failure rolls back the whole batch
     @PostMapping("/transactions/batch")
     public ResponseEntity<List<ExpenseTransaction>> addTransactions(
             @RequestBody List<ExpenseTransaction> transactions) {
 
-        log.info("POST /transactions/batch — {} records received", transactions.size());
+        log.info("POST /transactions/batch -- {} records", transactions.size());
 
-        List<ExpenseTransaction> saved = ledgerService.saveAllTransactions(transactions);
-        return ResponseEntity.status(HttpStatus.CREATED).body(saved);
+        return ResponseEntity.status(HttpStatus.CREATED)
+                .body(ledgerService.saveAllTransactions(transactions));
     }
 
-    // -------------------------------------------------------------------------
-    // Settlement optimisation
-    // -------------------------------------------------------------------------
-
-    /**
-     * GET /api/v1/settlements/optimize
-     *
-     * <p>Runs the O(N log N) greedy heap algorithm synchronously over all
-     * unsettled transactions. Blocks until the result is ready. Use for
-     * small groups or admin tooling where response latency is acceptable.</p>
-     *
-     * @return 200 OK with the minimal list of synthetic settlement transactions
-     */
+    // GET /optimize -- synchronous; fine for small groups or admin tooling
     @GetMapping("/optimize")
     public ResponseEntity<List<ExpenseTransaction>> optimize() {
-        log.info("GET /optimize — running synchronous settlement pass");
-
-        List<ExpenseTransaction> result = ledgerService.optimizeDebts();
-        return ResponseEntity.ok(result);
+        log.info("GET /optimize -- synchronous settlement pass");
+        return ResponseEntity.ok(ledgerService.optimizeDebts());
     }
 
-    /**
-     * GET /api/v1/settlements/optimize/async
-     *
-     * <p>Triggers the settlement algorithm asynchronously. The I/O thread
-     * is released immediately -- Spring MVC resolves the CompletableFuture
-     * into a deferred HTTP response once the background thread completes.
-     * Response time depends on group size and executor queue depth.</p>
-     *
-     * @return deferred 200 OK with the settlement list, resolved asynchronously
-     */
+    // GET /optimize/async -- non-blocking; I/O thread released immediately
     @GetMapping("/optimize/async")
     public CompletableFuture<ResponseEntity<List<ExpenseTransaction>>> optimizeAsync() {
-        log.info("GET /optimize/async — dispatching to settlement thread pool");
-
-        // thenApply runs on the completing thread (settlement-async-*), not the I/O thread
-        return ledgerService.optimizeDebtsAsync()
-                .thenApply(ResponseEntity::ok);
+        log.info("GET /optimize/async -- dispatching to settlement thread pool");
+        return ledgerService.optimizeDebtsAsync().thenApply(ResponseEntity::ok);
     }
 
-    /**
-     * POST /api/v1/settlements/optimize/group
-     *
-     * <p>Async optimisation scoped to a specific set of participants (e.g. a
-     * trip or household). Only transactions where both payer and payee appear
-     * in the supplied list are included, isolating the result from unrelated
-     * ledger activity.</p>
-     *
-     * <p>Example body: ["uuid-1", "uuid-2", "uuid-3"]</p>
-     *
-     * @param userIds JSON array of participant UUIDs
-     * @return deferred 200 OK with the scoped settlement list
-     */
+    // POST /optimize/group -- async, scoped to a participant set (trip, household, etc.)
     @PostMapping("/optimize/group")
     public CompletableFuture<ResponseEntity<List<ExpenseTransaction>>> optimizeForGroup(
             @RequestBody List<UUID> userIds) {
 
-        log.info("POST /optimize/group — {} participants", userIds.size());
-
-        return ledgerService.optimizeDebtsForGroup(userIds)
-                .thenApply(ResponseEntity::ok);
+        log.info("POST /optimize/group -- {} participants", userIds.size());
+        return ledgerService.optimizeDebtsForGroup(userIds).thenApply(ResponseEntity::ok);
     }
 }
