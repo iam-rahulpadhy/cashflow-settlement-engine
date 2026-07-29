@@ -1,42 +1,92 @@
-# cashflow-settlement-engine
+# Cash Flow Settlement Engine
 
-A Spring Boot microservice that ingests raw expense records from a group of participants and computes the **minimum number of payments** needed to settle all debts — the core algorithm behind apps like Splitwise.
+A REST API that figures out the **minimum number of payments** needed to settle debts in a group — basically the backend logic of something like Splitwise.
+
+The interesting part is the algorithm. If 6 people go on a trip and pay for different things, you can easily end up with 10+ debt relationships. This engine collapses all of that down to at most **N−1 payments** (where N is the number of people), which is the theoretical minimum.
 
 ---
 
-## How the algorithm works
+## How it works — the big picture
 
-Debt between N people is modeled as a directed weighted graph. A naive settlement touches every edge individually — up to O(N²) payments. This engine reduces that to **at most N−1 payments** in **O(N log N)** time using two heaps.
+```mermaid
+flowchart TD
+    Client(["Client (Postman / App)"])
+    SF["Spring Security\n(HTTP Basic Auth)"]
+    SC["SettlementController"]
+    LS["LedgerService"]
+    ASYNC["@Async Thread Pool\nsettlement-async-*"]
+    ALGO["GreedyHeapSettlementStrategy\n(min/max-heap algorithm)"]
+    DB[("PostgreSQL")]
 
-**Step 1 — Net balance aggregation (O(M)):**  
-For each raw transaction, add the amount to the payee's balance and subtract it from the payer's. After one pass, every participant has a single signed net value: positive = creditor, negative = debtor, zero = already square.
+    Client -->|"POST /transactions"| SF
+    Client -->|"GET /optimize"| SF
+    Client -->|"GET /optimize/async"| SF
+    SF -->|"401 if unauthenticated"| Client
+    SF -->|"authenticated"| SC
 
-**Step 2 — Greedy cancellation (O(N log N)):**  
-Put debtors in a min-heap (largest debt at head) and creditors in a max-heap (largest credit at head). Each iteration pairs the biggest debtor with the biggest creditor, settles `min(|debt|, credit)` in one payment, and zeroes out at least one of them. The loop runs at most N−1 times.
+    SC -->|"save transaction"| LS
+    SC -->|"sync settle"| LS
+    SC -->|"async settle"| LS
 
+    LS -->|"persist"| DB
+    LS -->|"findBySettledFalse"| DB
+    LS -->|"dispatches via @Async"| ASYNC
+    ASYNC --> ALGO
+    LS --> ALGO
+    ALGO -->|"minimal settlement list"| LS
+    LS -->|"mark settled + save results"| DB
+    DB -->|"JSON response"| Client
 ```
-while heaps non-empty:
-    D = largest debtor,  C = largest creditor
-    pay = min(|D.balance|, C.balance)
-    emit: D → C, amount = pay
-    adjust balances, re-insert if non-zero
+
+---
+
+## The algorithm — step by step
+
+The core problem: given a messy web of who-owes-who, find the simplest way to clear everything.
+
+```mermaid
+flowchart TD
+    A["Raw Transactions\ne.g. Alice owes Bob $30, Bob owes Charlie $20 ..."]
+    B["Net Balance per Person\nOne pass over all transactions — O(M)"]
+    POS["Positive balance → Creditor\nsomeone owes them money"]
+    NEG["Negative balance → Debtor\nthey owe money"]
+    ZERO["Zero balance → skip\nalready square"]
+    MAXH["Max-Heap (Creditors)\nlargest creditor at top"]
+    MINH["Min-Heap (Debtors)\nlargest debtor at top"]
+    LOOP{"Both heaps\nnon-empty?"}
+    PAIR["Pair: biggest debtor D with biggest creditor C"]
+    SETTLE["settlement = min(|D's debt|, C's credit)\nemit payment: D → C"]
+    ADJ["Adjust both balances\nre-insert into heap if non-zero"]
+    DONE["Done\n≤ N−1 total payments — O(N log N)"]
+
+    A --> B
+    B --> POS --> MAXH
+    B --> NEG --> MINH
+    B --> ZERO
+    MAXH --> LOOP
+    MINH --> LOOP
+    LOOP -->|yes| PAIR --> SETTLE --> ADJ --> LOOP
+    LOOP -->|no| DONE
 ```
 
-| Phase                 | Time           | Space |
-|-----------------------|----------------|-------|
-| Balance aggregation   | O(M)           | O(N)  |
-| Heap construction     | O(N log N)     | O(N)  |
-| Greedy cancellation   | O(N log N)     | O(N)  |
-| **Total**             | **O(M + N log N)** | **O(N)** |
+**Why N−1 is the minimum:** you need at least one transaction per person to bring them to zero. With N people, that's N−1 edges in a spanning-tree sense. The heap approach guarantees this bound.
+
+**Complexity:**
+| Phase | Time |
+|---|---|
+| Balance aggregation | O(M) |
+| Heap operations | O(N log N) |
+| **Total** | **O(M + N log N)** |
 
 ---
 
 ## Tech stack
 
-- Java 21, Spring Boot 3.x, Spring Security (HTTP Basic Auth)
-- Spring Data JPA + PostgreSQL
-- `@Async` + `CompletableFuture` for non-blocking settlement runs
-- H2 in-memory DB for local testing (no Postgres needed)
+- Java 21 + Spring Boot 3
+- Spring Security — HTTP Basic Auth
+- Spring Data JPA + Hibernate + PostgreSQL
+- `@Async` + `CompletableFuture` — settlement runs on a separate thread pool so the HTTP thread isn't blocked
+- H2 in-memory DB for running without PostgreSQL
 
 ---
 
@@ -45,39 +95,43 @@ while heaps non-empty:
 ```
 src/main/java/com/cashflow/
 ├── api/
-│   ├── SettlementController.java          # REST endpoints
-│   └── GlobalExceptionHandler.java        # translates exceptions to JSON errors
+│   ├── SettlementController.java          # 3 REST endpoints
+│   └── GlobalExceptionHandler.java        # JSON error responses
 ├── config/
-│   └── SecurityConfig.java                # HTTP Basic Auth, CSRF disabled
+│   └── SecurityConfig.java                # Basic Auth, CSRF off
 ├── engine/
-│   ├── SettlementAlgorithm.java           # strategy interface
-│   └── GreedyHeapSettlementStrategy.java  # min/max-heap implementation
+│   ├── SettlementAlgorithm.java           # interface (strategy pattern)
+│   └── GreedyHeapSettlementStrategy.java  # the actual heap algorithm
 ├── entity/
-│   ├── ExpenseTransaction.java            # JPA entity (the primary table)
-│   └── UserNetBalance.java                # transient POJO used by the algorithm
+│   ├── ExpenseTransaction.java            # main JPA table
+│   └── UserNetBalance.java                # helper POJO for the algorithm
 ├── repository/
 │   └── TransactionRepository.java
 ├── runner/
-│   └── TestRunner.java                    # proof harness (h2test profile)
+│   └── TestRunner.java                    # self-contained proof (h2test profile)
 └── service/
     └── LedgerService.java
 ```
 
 ---
 
-## Running locally
+## Running it
 
-**With H2 (no Postgres needed):**
+**No PostgreSQL (H2 in-memory):**
 ```bash
 ./mvnw spring-boot:run -Dspring-boot.run.profiles=h2test
 ```
-Prints the algorithm proof on startup — 11 raw edges collapsed to 4 settlements (≤ V−1 = 5).
+Boots up, runs the algorithm on a hardcoded 6-person scenario, and prints the proof:
+```
+11 raw transactions → 4 settlements  (≤ V−1 = 5)  PASS
+```
 
 **With PostgreSQL:**
-
-Create a database named `cashflow_db`, then configure credentials in `src/main/resources/application.yml` (or via env vars `DB_HOST`, `DB_PORT`, `DB_NAME`, `DB_USER`, `DB_PASS`):
-
 ```bash
+# one-time setup
+sudo -u postgres psql -c "ALTER USER postgres PASSWORD 'postgres';"
+sudo -u postgres psql -c "CREATE DATABASE cashflow_db;"
+
 ./mvnw spring-boot:run
 ```
 
@@ -85,22 +139,17 @@ Create a database named `cashflow_db`, then configure credentials in `src/main/r
 
 ## API
 
-All endpoints require **HTTP Basic Auth** (default: `admin` / `admin`, overridable via `SECURITY_USER` and `SECURITY_PASS` env vars).
-
+All endpoints need **Basic Auth** — default credentials: `admin` / `admin`.
 
 ```
-POST   /api/v1/settlements/transactions     # ingest one expense record
-GET    /api/v1/settlements/optimize         # run settlement (sync)
-GET    /api/v1/settlements/optimize/async   # run settlement (async, non-blocking)
+POST  /api/v1/settlements/transactions    — add a debt record
+GET   /api/v1/settlements/optimize        — run settlement (blocks until done)
+GET   /api/v1/settlements/optimize/async  — run settlement (returns immediately)
 ```
 
-**Example — add a transaction:**
-```json
-POST /api/v1/settlements/transactions
-{
-  "amount": 120.50,
-  "description": "Dinner",
-  "payerId": "aaaaaaaa-0000-0000-0000-000000000001",
-  "payeeId": "bbbbbbbb-0000-0000-0000-000000000002"
-}
+**Quick example:**
+```bash
+curl -u admin:admin -X POST http://localhost:8080/api/v1/settlements/transactions \
+  -H "Content-Type: application/json" \
+  -d '{"amount": 50.00, "description": "Dinner", "payerId": "aaaaaaaa-0000-0000-0000-000000000001", "payeeId": "bbbbbbbb-0000-0000-0000-000000000002"}'
 ```
