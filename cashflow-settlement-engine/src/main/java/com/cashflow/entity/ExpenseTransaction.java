@@ -5,17 +5,7 @@ import java.math.BigDecimal;
 import java.time.Instant;
 import java.util.UUID;
 
-/*
- * A single directed debt: payerId owes payeeId the given amount.
- *
- * Before optimisation the table holds raw, potentially cyclical obligations.
- * After the engine runs, raw rows are flagged settled=true and replaced by
- * the minimal synthetic settlement set (also stored here as settled=true --
- * an audit log so they are never re-fed into the algorithm).
- *
- * UUID primary key instead of a sequence so IDs can be generated client-side
- * without a DB round-trip.
- */
+// settled=false -> pending; settled=true -> absorbed by the engine (never re-fed into algorithm)
 @Entity
 @Table(
     name = "expense_transactions",
@@ -32,11 +22,9 @@ public class ExpenseTransaction {
     @Column(name = "id", updatable = false, nullable = false, columnDefinition = "uuid")
     private UUID id;
 
-    // Precision 19, scale 4 handles large sums with sub-cent accuracy for pro-rata splits.
     @Column(name = "amount", nullable = false, precision = 19, scale = 4)
     private BigDecimal amount;
 
-    // TEXT instead of VARCHAR to avoid truncation on long receipt descriptions.
     @Column(name = "description", nullable = false, columnDefinition = "TEXT")
     private String description;
 
@@ -46,7 +34,6 @@ public class ExpenseTransaction {
     @Column(name = "payee_id", nullable = false, columnDefinition = "uuid")
     private UUID payeeId;
 
-    // false = pending obligation; true = absorbed by the settlement engine.
     @Column(name = "settled", nullable = false)
     private boolean settled = false;
 

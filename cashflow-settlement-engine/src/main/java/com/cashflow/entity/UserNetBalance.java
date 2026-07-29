@@ -3,18 +3,7 @@ package com.cashflow.entity;
 import java.math.BigDecimal;
 import java.util.UUID;
 
-/*
- * Mutable POJO used during settlement computation.
- *
- * netBalance = sum(amounts owed TO this user) - sum(amounts owed BY this user)
- *   positive -> creditor (others owe them)
- *   negative -> debtor   (they owe others)
- *   zero     -> already square, skipped by algorithm
- *
- * Comparable orders by netBalance ascending so PriorityQueue works naturally:
- *   min-heap -> most-negative debtor is at the head
- *   max-heap (Comparator.reverseOrder()) -> most-positive creditor is at the head
- */
+// positive netBalance = creditor, negative = debtor, zero = already square
 public class UserNetBalance implements Comparable<UserNetBalance> {
 
     private final UUID userId;
@@ -35,9 +24,9 @@ public class UserNetBalance implements Comparable<UserNetBalance> {
         return this.netBalance.compareTo(other.netBalance);
     }
 
-    public UUID       getUserId()                { return userId; }
-    public BigDecimal getNetBalance()            { return netBalance; }
-    public void       setNetBalance(BigDecimal b){ this.netBalance = b; }
+    public UUID       getUserId()                 { return userId; }
+    public BigDecimal getNetBalance()             { return netBalance; }
+    public void       setNetBalance(BigDecimal b) { this.netBalance = b; }
 
     @Override
     public String toString() {

@@ -10,16 +10,8 @@ import java.math.BigDecimal;
 import java.util.*;
 
 /*
- * Proof-of-concept test harness -- runs on startup under the "h2test" profile.
- *
- * Calls the algorithm directly (no DB) with a 6-person beach-trip scenario:
- * 11 raw expense edges -> 4 settlement edges, proving the V-1 bound holds.
- *
- * Net balances after aggregation:
- *   Alice +90  Bob +15  (creditors)
- *   Charlie -20  Diana -5  Frank -80  (debtors)
- *   Eve 0 -- already square, skipped
- *
+ * Proof harness — active only under the "h2test" profile.
+ * 6 participants, 11 raw edges -> must collapse to <= 5 (V-1) settlements.
  * Run: ./mvnw spring-boot:run -Dspring-boot.run.profiles=h2test
  */
 @Component
@@ -28,7 +20,6 @@ public class TestRunner implements CommandLineRunner {
 
     private final SettlementAlgorithm settlementAlgorithm;
 
-    // Fixed UUIDs so the output is reproducible across runs.
     private static final UUID ALICE   = UUID.fromString("aaaaaaaa-0000-0000-0000-000000000001");
     private static final UUID BOB     = UUID.fromString("bbbbbbbb-0000-0000-0000-000000000002");
     private static final UUID CHARLIE = UUID.fromString("cccccccc-0000-0000-0000-000000000003");
@@ -59,28 +50,22 @@ public class TestRunner implements CommandLineRunner {
         }
     }
 
-    // 11-edge debt graph with cycles and cross-debts to make the reduction dramatic.
     private List<ExpenseTransaction> buildDebtGraph() {
         List<ExpenseTransaction> txns = new ArrayList<>();
 
-        // Alice covered group dinner
         txns.add(tx(30, "Dinner share",    BOB,     ALICE));
         txns.add(tx(30, "Dinner share",    CHARLIE, ALICE));
         txns.add(tx(40, "Dinner share",    DIANA,   ALICE));
 
-        // Bob covered groceries
         txns.add(tx(20, "Grocery share",   CHARLIE, BOB));
         txns.add(tx(25, "Grocery share",   EVE,     BOB));
 
-        // Charlie covered drinks
         txns.add(tx(15, "Drinks share",    DIANA,   CHARLIE));
         txns.add(tx(15, "Drinks share",    FRANK,   CHARLIE));
 
-        // Diana covered transport
         txns.add(tx(25, "Transport share", EVE,     DIANA));
         txns.add(tx(25, "Transport share", FRANK,   DIANA));
 
-        // Eve covered lunch
         txns.add(tx(40, "Lunch share",     FRANK,   EVE));
         txns.add(tx(10, "Lunch share",     ALICE,   EVE));
 

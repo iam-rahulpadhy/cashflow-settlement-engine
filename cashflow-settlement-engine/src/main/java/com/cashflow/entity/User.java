@@ -4,12 +4,6 @@ import jakarta.persistence.*;
 import java.time.Instant;
 import java.util.UUID;
 
-/*
- * A participant in the settlement system.
- *
- * Deliberately lean -- the settlement algorithm only needs a stable UUID.
- * Auth, email, and profile data belong in a separate service.
- */
 @Entity
 @Table(
     name = "users",

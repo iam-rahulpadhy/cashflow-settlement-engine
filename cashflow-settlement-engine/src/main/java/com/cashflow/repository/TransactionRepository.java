@@ -16,7 +16,6 @@ public interface TransactionRepository extends JpaRepository<ExpenseTransaction,
 
     List<ExpenseTransaction> findByPayeeIdAndSettledFalse(UUID payeeId);
 
-    // Primary input for a full-ledger optimisation pass.
     List<ExpenseTransaction> findBySettledFalse();
 
     @Query("""
@@ -27,7 +26,7 @@ public interface TransactionRepository extends JpaRepository<ExpenseTransaction,
         """)
     List<ExpenseTransaction> findAllTransactionsInvolvingUser(@Param("userId") UUID userId);
 
-    // Scopes optimisation to a specific group -- trip, household, etc.
+    // Both lists are the same group — scopes optimisation to a trip/household subset
     @Query("""
         SELECT t FROM ExpenseTransaction t
         WHERE t.payerId IN :payerIds

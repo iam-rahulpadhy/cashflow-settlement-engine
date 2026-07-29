@@ -14,14 +14,6 @@ import java.util.List;
 import java.util.UUID;
 import java.util.concurrent.CompletableFuture;
 
-/*
- * Orchestrates the settlement lifecycle: ingestion, optimisation, persistence.
- *
- * The async methods run on the "settlement-async-" thread pool (application.yml)
- * so large optimisation passes never block the Tomcat I/O thread. Spring opens
- * a fresh @Transactional boundary inside the async thread, so @Async and
- * @Transactional on the same method work correctly -- no proxy collision.
- */
 @Service
 public class LedgerService {
 
@@ -39,8 +31,7 @@ public class LedgerService {
     @Transactional
     public ExpenseTransaction saveTransaction(ExpenseTransaction transaction) {
         validate(transaction);
-        log.info("Persisting: {} -> {} amount={}",
-                transaction.getPayerId(), transaction.getPayeeId(), transaction.getAmount());
+        log.info("Persisting: {} -> {} amount={}", transaction.getPayerId(), transaction.getPayeeId(), transaction.getAmount());
         return transactionRepository.save(transaction);
     }
 
@@ -49,7 +40,6 @@ public class LedgerService {
         if (transactions == null || transactions.isEmpty()) {
             throw new IllegalArgumentException("transaction list must not be null or empty");
         }
-        // Validate the whole batch before touching the DB -- partial commits are messy.
         transactions.forEach(this::validate);
         log.info("Batch persisting {} transactions", transactions.size());
         return transactionRepository.saveAll(transactions);
@@ -64,14 +54,12 @@ public class LedgerService {
         return settlements;
     }
 
-    // @Async dispatches to the thread pool; the controller gets back a
-    // CompletableFuture that Spring MVC resolves as a deferred HTTP response.
+    // @Async releases the Tomcat I/O thread immediately; heavy computation runs on settlement-async-* pool
     @Async
     @Transactional
     public CompletableFuture<List<ExpenseTransaction>> optimizeDebtsAsync() {
         List<ExpenseTransaction> raw = transactionRepository.findBySettledFalse();
-        log.info("Async optimisation on [{}]: {} raw transactions",
-                Thread.currentThread().getName(), raw.size());
+        log.info("Async optimisation on [{}]: {} raw transactions", Thread.currentThread().getName(), raw.size());
         List<ExpenseTransaction> settlements = settlementAlgorithm.optimizeDebts(raw);
         persistSettlementResult(raw, settlements);
         return CompletableFuture.completedFuture(settlements);
@@ -83,8 +71,7 @@ public class LedgerService {
         if (userIds == null || userIds.isEmpty()) {
             throw new IllegalArgumentException("userIds must not be null or empty");
         }
-        List<ExpenseTransaction> raw =
-                transactionRepository.findUnsettledWithinGroup(userIds, userIds);
+        List<ExpenseTransaction> raw = transactionRepository.findUnsettledWithinGroup(userIds, userIds);
         log.info("Async group optimisation on [{}]: {} users, {} transactions",
                 Thread.currentThread().getName(), userIds.size(), raw.size());
         List<ExpenseTransaction> settlements = settlementAlgorithm.optimizeDebts(raw);
@@ -107,9 +94,6 @@ public class LedgerService {
         }
     }
 
-    // Raw rows are flagged settled so they never re-enter the algorithm.
-    // Synthetic rows are saved as settled=true too -- they are the computed answer,
-    // not new pending debts, so they should not pollute the next optimisation run.
     private void persistSettlementResult(List<ExpenseTransaction> raw,
                                          List<ExpenseTransaction> settlements) {
         raw.forEach(tx -> tx.setSettled(true));
