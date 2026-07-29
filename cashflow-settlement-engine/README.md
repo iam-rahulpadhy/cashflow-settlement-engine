@@ -33,7 +33,7 @@ while heaps non-empty:
 
 ## Tech stack
 
-- Java 21, Spring Boot 3.x
+- Java 21, Spring Boot 3.x, Spring Security (HTTP Basic Auth)
 - Spring Data JPA + PostgreSQL
 - `@Async` + `CompletableFuture` for non-blocking settlement runs
 - H2 in-memory DB for local testing (no Postgres needed)
@@ -45,18 +45,20 @@ while heaps non-empty:
 ```
 src/main/java/com/cashflow/
 ├── api/
-│   ├── SettlementController.java     # REST endpoints
-│   └── GlobalExceptionHandler.java   # translates exceptions to JSON errors
+│   ├── SettlementController.java          # REST endpoints
+│   └── GlobalExceptionHandler.java        # translates exceptions to JSON errors
+├── config/
+│   └── SecurityConfig.java                # HTTP Basic Auth, CSRF disabled
 ├── engine/
-│   ├── SettlementAlgorithm.java      # strategy interface
+│   ├── SettlementAlgorithm.java           # strategy interface
 │   └── GreedyHeapSettlementStrategy.java  # min/max-heap implementation
 ├── entity/
-│   ├── ExpenseTransaction.java       # JPA entity (the primary table)
-│   └── UserNetBalance.java           # transient POJO used by the algorithm
+│   ├── ExpenseTransaction.java            # JPA entity (the primary table)
+│   └── UserNetBalance.java                # transient POJO used by the algorithm
 ├── repository/
 │   └── TransactionRepository.java
 ├── runner/
-│   └── TestRunner.java               # proof harness (h2test profile)
+│   └── TestRunner.java                    # proof harness (h2test profile)
 └── service/
     └── LedgerService.java
 ```
@@ -82,6 +84,9 @@ Create a database named `cashflow_db`, then configure credentials in `src/main/r
 ---
 
 ## API
+
+All endpoints require **HTTP Basic Auth** (default: `admin` / `admin`, overridable via `SECURITY_USER` and `SECURITY_PASS` env vars).
+
 
 ```
 POST   /api/v1/settlements/transactions     # ingest one expense record
