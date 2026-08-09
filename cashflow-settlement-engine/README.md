@@ -11,18 +11,15 @@ The interesting part is the algorithm. If 6 people go on a trip and pay for diff
 ```mermaid
 flowchart TD
     Client(["Client (Postman / App)"])
-    SF["Spring Security\n(HTTP Basic Auth)"]
     SC["SettlementController"]
     LS["LedgerService"]
     ASYNC["@Async Thread Pool\nsettlement-async-*"]
     ALGO["GreedyHeapSettlementStrategy\n(min/max-heap algorithm)"]
     DB[("PostgreSQL")]
 
-    Client -->|"POST /transactions"| SF
-    Client -->|"GET /optimize"| SF
-    Client -->|"GET /optimize/async"| SF
-    SF -->|"401 if unauthenticated"| Client
-    SF -->|"authenticated"| SC
+    Client -->|"POST /transactions"| SC
+    Client -->|"GET /optimize"| SC
+    Client -->|"GET /optimize/async"| SC
 
     SC -->|"save transaction"| LS
     SC -->|"sync settle"| LS
@@ -83,7 +80,6 @@ flowchart TD
 ## Tech stack
 
 - Java 21 + Spring Boot 3
-- Spring Security — HTTP Basic Auth
 - Spring Data JPA + Hibernate + PostgreSQL
 - `@Async` + `CompletableFuture` — settlement runs on a separate thread pool so the HTTP thread isn't blocked
 - H2 in-memory DB for running without PostgreSQL
@@ -97,8 +93,6 @@ src/main/java/com/cashflow/
 ├── api/
 │   ├── SettlementController.java          # 3 REST endpoints
 │   └── GlobalExceptionHandler.java        # JSON error responses
-├── config/
-│   └── SecurityConfig.java                # Basic Auth, CSRF off
 ├── engine/
 │   ├── SettlementAlgorithm.java           # interface (strategy pattern)
 │   └── GreedyHeapSettlementStrategy.java  # the actual heap algorithm
@@ -139,8 +133,6 @@ sudo -u postgres psql -c "CREATE DATABASE cashflow_db;"
 
 ## API
 
-All endpoints need **Basic Auth** — default credentials: `admin` / `admin`.
-
 ```
 POST  /api/v1/settlements/transactions    — add a debt record
 GET   /api/v1/settlements/optimize        — run settlement (blocks until done)
@@ -149,7 +141,7 @@ GET   /api/v1/settlements/optimize/async  — run settlement (returns immediatel
 
 **Quick example:**
 ```bash
-curl -u admin:admin -X POST http://localhost:8080/api/v1/settlements/transactions \
+curl -X POST http://localhost:8080/api/v1/settlements/transactions \
   -H "Content-Type: application/json" \
   -d '{"amount": 50.00, "description": "Dinner", "payerId": "aaaaaaaa-0000-0000-0000-000000000001", "payeeId": "bbbbbbbb-0000-0000-0000-000000000002"}'
 ```
