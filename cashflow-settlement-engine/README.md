@@ -82,7 +82,6 @@ flowchart TD
 - Java 21 + Spring Boot 3
 - Spring Data JPA + Hibernate + PostgreSQL
 - `@Async` + `CompletableFuture` — settlement runs on a separate thread pool so the HTTP thread isn't blocked
-- H2 in-memory DB for running without PostgreSQL
 
 ---
 
@@ -101,8 +100,6 @@ src/main/java/com/cashflow/
 │   └── UserNetBalance.java                # helper POJO for the algorithm
 ├── repository/
 │   └── TransactionRepository.java
-├── runner/
-│   └── TestRunner.java                    # self-contained proof (h2test profile)
 └── service/
     └── LedgerService.java
 ```
@@ -111,16 +108,6 @@ src/main/java/com/cashflow/
 
 ## Running it
 
-**No PostgreSQL (H2 in-memory):**
-```bash
-./mvnw spring-boot:run -Dspring-boot.run.profiles=h2test
-```
-Boots up, runs the algorithm on a hardcoded 6-person scenario, and prints the proof:
-```
-11 raw transactions → 4 settlements  (≤ V−1 = 5)  PASS
-```
-
-**With PostgreSQL:**
 ```bash
 # one-time setup
 sudo -u postgres psql -c "ALTER USER postgres PASSWORD 'postgres';"
